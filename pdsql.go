@@ -2,10 +2,12 @@
 package pdsql
 
 import (
-	"github.com/wenerme/coredns-pdsql/pdnsmodel"
+	"fmt"
 	"net"
 	"strconv"
 	"strings"
+
+	"github.com/wenerme/coredns-pdsql/pdnsmodel"
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/request"
@@ -37,7 +39,6 @@ func (pdb PowerDNSGenericSQLBackend) ServeDNS(ctx context.Context, w dns.Respons
 		// remove last dot
 		query.Name = query.Name[:len(query.Name)-1]
 	}
-
 	switch state.QType() {
 	case dns.TypeANY:
 		query.Type = ""
@@ -54,12 +55,14 @@ func (pdb PowerDNSGenericSQLBackend) ServeDNS(ctx context.Context, w dns.Respons
 				}
 			}
 		} else {
+			fmt.Printf("RcodeServerFailure: %v\n", err)
 			return dns.RcodeServerFailure, err
 		}
 	} else {
 		if len(records) == 0 {
 			records, err = pdb.SearchWildcard(state.QName(), state.QType())
 			if err != nil {
+				fmt.Printf("RcodeServerFailure[2]: %v\n", err)
 				return dns.RcodeServerFailure, err
 			}
 		}
@@ -77,6 +80,7 @@ func (pdb PowerDNSGenericSQLBackend) ServeDNS(ctx context.Context, w dns.Respons
 			case *dns.SOA:
 				rr.Hdr = hrd
 				if !ParseSOA(rr, v.Content) {
+					fmt.Printf("ParseSOA failed\n")
 					rr = nil
 				}
 			case *dns.A:
@@ -99,6 +103,22 @@ func (pdb PowerDNSGenericSQLBackend) ServeDNS(ctx context.Context, w dns.Respons
 				} else {
 					rr.Ptr = v.Content + "."
 				}
+			case *dns.SRV: 
+				rr.Hdr = hrd
+				split := strings.Split(v.Content, ":")
+				target := split[0]
+				if port, err := strconv.Atoi(split[1]); err == nil {
+					rr.Port = uint16(port)
+					if strings.HasSuffix(target, ".") {
+						rr.Target = target
+					} else {
+						rr.Target = target + "."
+					}
+					rr.Priority = uint16(v.Prio)
+					rr.Weight = 10
+					break
+				}
+				rr = nil 
 			default:
 				// drop unsupported
 			}
@@ -113,7 +133,7 @@ func (pdb PowerDNSGenericSQLBackend) ServeDNS(ctx context.Context, w dns.Respons
 	if len(a.Answer) == 0 {
 		return plugin.NextOrFailure(pdb.Name(), pdb.Next, ctx, w, r)
 	}
-
+	fmt.Printf("a = %v\n-------------------------------------------------------------\n", a)
 	return 0, w.WriteMsg(a)
 }
 
